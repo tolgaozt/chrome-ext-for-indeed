@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Indeed Scraper</title>
+  <style>
+    :root {
+      /* Image URL */
+      --background-image-url: url('bg.png'); /* Image in root folder */
+
+      /* Color Palette */
+      --misty-blue: #c3ceda;
+      --blue-gray: #738fa7;
+      --midnight-blue: #0c4160;
+      --dark-blue: #071330;
+
+      /* Button Specific Colors */
+      --start-text: #ffffff;        /* White text */
+      --start-bg: rgba(115, 143, 167, 0.25); /* Transparent Blue Gray */
+      --start-hover-bg: rgba(115, 143, 167, 0.45);
+      --start-border: rgba(195, 206, 218, 0.5);  /* Misty Blue border */
+
+      --download-text: #ffffff;     /* White text */
+      --download-bg: rgba(25, 135, 84, 0.3);   /* Transparent Green */
+      --download-hover-bg: rgba(25, 135, 84, 0.5);
+      --download-border: rgba(67, 187, 123, 0.6);  /* Lighter Green border */
+
+      --clear-text: #ffffff;        /* White text */
+      --clear-bg: rgba(220, 53, 69, 0.25);  /* Transparent Red */
+      --clear-hover-bg: rgba(220, 53, 69, 0.45);
+      --clear-border: rgba(232, 154, 161, 0.6); /* Lighter Red border */
+
+      /* Stop button uses same style as Clear */
+      --stop-text: var(--clear-text);
+      --stop-bg: var(--clear-bg);
+      --stop-hover-bg: var(--clear-hover-bg);
+      --stop-border: var(--clear-border);
+
+
+      /* General Derived/Adjusted Colors */
+      --background-overlay: rgba(7, 19, 48, 0.7); /* Dark blue overlay, slightly increased opacity */
+      --blur-intensity: 4px; /* Adjusted blur */
+      --border-color: rgba(195, 206, 218, 0.3); /* Default border (used if button border isn't set) */
+      --text-color-general: var(--misty-blue); /* Default light text for non-button elements */
+      --heading-color: #ffffff; /* Pure white for heading */
+
+      /* Layout */
+      --border-radius: 12px;
+      --popup-width: 300px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+      width: var(--popup-width);
+      padding: 18px;
+      margin: 0;
+      color: var(--text-color-general); /* Default text color for non-button elements */
+
+      /* Background Setup using layered background-image */
+      background-image: linear-gradient(var(--background-overlay), var(--background-overlay)), var(--background-image-url);
+      background-size: cover;
+      background-position: center center;
+      background-repeat: no-repeat;
+      background-attachment: fixed;
+      /* No separate background-color here */
+
+      /* Style */
+      backdrop-filter: blur(var(--blur-intensity));
+      -webkit-backdrop-filter: blur(var(--blur-intensity));
+      border-radius: var(--border-radius);
+      border: 1px solid var(--border-color);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+    }
+
+    h3 {
+      text-align: center;
+      margin-top: 0;
+      margin-bottom: 20px;
+      font-weight: 600;
+      color: var(--heading-color);
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); /* Slightly stronger shadow */
+    }
+
+    hr {
+      border: none;
+      height: 1px;
+      background-color: rgba(195, 206, 218, 0.2);
+      margin: 20px 0;
+    }
+
+    /* --- Default Button Styles --- */
+    button {
+      width: 100%;
+      padding: 10px 15px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      border: 1px solid var(--border-color); /* Default border */
+      border-radius: 8px;
+       /* Default background/color will be overridden by specific styles below */
+      background-color: rgba(195, 206, 218, 0.1); /* Fallback very transparent */
+      color: var(--misty-blue); /* Fallback light text */
+      font-size: 14px;
+      font-weight: 500;
+      transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.1s ease, box-shadow 0.2s ease;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      backdrop-filter: blur(3px); /* Apply inner blur effect */
+      -webkit-backdrop-filter: blur(3px);
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); /* Text shadow for readability */
+    }
+
+     /* General button hover - slightly increase border visibility */
+     button:hover:not(:disabled) {
+       box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+     }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+      /* Keep background slightly visible but faded */
+      background-color: rgba(195, 206, 218, 0.1);
+    }
+
+     button:active {
+      transform: scale(0.98);
+      box-shadow: none;
+    }
+
+    /* --- Specific Button Styles --- */
+
+    #startButton {
+      color: var(--start-text);
+      background-color: var(--start-bg);
+      border-color: var(--start-border);
+    }
+    #startButton:hover:not(:disabled) {
+      background-color: var(--start-hover-bg);
+      border-color: rgba(195, 206, 218, 0.7); /* Lighter Misty Blue border on hover */
+    }
+
+    #downloadButton {
+        color: var(--download-text);
+        background-color: var(--download-bg);
+        border-color: var(--download-border);
+    }
+    #downloadButton:hover:not(:disabled) {
+        background-color: var(--download-hover-bg);
+        border-color: rgba(107, 217, 163, 0.7); /* Lighter Green border on hover */
+    }
+
+    #clearButton {
+        color: var(--clear-text);
+        background-color: var(--clear-bg);
+        border-color: var(--clear-border);
+    }
+    #clearButton:hover:not(:disabled) {
+        background-color: var(--clear-hover-bg);
+        border-color: rgba(242, 174, 181, 0.7); /* Lighter Red border on hover */
+    }
+
+     #stopButton {
+        color: var(--stop-text);
+        background-color: var(--stop-bg);
+        border-color: var(--stop-border);
+    }
+    #stopButton:hover:not(:disabled) {
+        background-color: var(--stop-hover-bg);
+        border-color: rgba(242, 174, 181, 0.7); /* Lighter Red border on hover */
+    }
+
+    #status {
+      margin-top: 15px;
+      font-style: normal;
+      font-size: 13px;
+      text-align: center;
+      color: var(--misty-blue);
+      min-height: 1.2em;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); /* Slightly stronger shadow */
+    }
+    
+    /* New styles for job counter and checkbox */
+    #jobCounter {
+      margin-top: 8px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--misty-blue);
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    }
+    
+    input[type="checkbox"] {
+      cursor: pointer;
+      accent-color: var(--blue-gray);
+    }
+    
+    label {
+      cursor: pointer;
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <h3>Indeed Scraper</h3>
+  <button id="startButton">Start Scraping</button>
+  <button id="stopButton" class="hidden">Stop Scraping</button>
+  <hr>
+  <button id="downloadButton">Download Jobs (CSV)</button>
+  <button id="clearButton">Clear Stored Jobs</button>
+  <div id="status">Status: Idle</div>
+  <!-- Job counter and auto-delete checkbox will be inserted by JS -->
+
+  <script src="popup.js"></script>
+</body>
+</html>

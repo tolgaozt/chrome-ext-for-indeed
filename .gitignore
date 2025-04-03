@@ -1,0 +1,65 @@
+
+# ... (gitignore content remains the same) ...
+# Environment variables
+.env*
+*.env
+env.yaml
+config.json
+credentials.json
+secrets.*
+*.pem
+*.key
+
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.venv/
+venv/
+env/
+.env/
+pip-log.txt
+pip-delete-this-directory.txt
+*.egg-info/
+dist/
+build/
+*.spec
+
+# IDE/Editor specific files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo
+*~
+# Netbeans specific
+nbproject/
+# Eclipse specific
+.settings/
+.project
+.classpath
+
+# OS specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build artifacts / Logs / Dependencies (example)
+*.log
+*.sqlite
+*.db
+node_modules/
+vendor/
+target/
+coverage.*
+*.war
+*.ear
+
+# Test results
+/htmlcov/
+/.pytest_cache/
+/.tox/
+junit.xml

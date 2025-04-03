@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Indeed Job Scraper (Manual Click)",
+  "version": "1.0",
+  "description": "Scrapes job details from Indeed search results after manually clicking each job.",
+  "permissions": [
+    "storage",
+    "downloads",
+    "scripting",
+    "activeTab",
+    "windows" 
+  ],
+  "host_permissions": [
+    "*://*.indeed.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.indeed.com/jobs*", 
+        "*://*.indeed.com/viewjob*",
+        "*://*.indeed.com/m/jobs*",
+        "*://*.indeed.com/m/viewjob*",
+        "*://*.indeed.com/*/jobs*", 
+        "*://*.indeed.com/*/viewjob*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html", 
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

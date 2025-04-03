@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Indeed Scraper (Manual Click) - README</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            margin: 20px;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+        }
+        h1, h2 {
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+            margin-top: 30px;
+        }
+        h1 {
+            text-align: center;
+        }
+        code {
+            background-color: #eee;
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        strong {
+            font-weight: 600;
+        }
+        .caution {
+            color: #a00;
+            font-weight: bold;
+        }
+        ol li, ul li {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Indeed Scraper (Manual Click) - README</h1>
+
+    <h2>Purpose</h2>
+    <p>
+        This Chrome/Brave extension allows you to scrape job details from an Indeed job search results page. It works by requiring you to <strong>manually click</strong> on each job listing you want to capture. The details are then extracted from the right-hand panel that appears, stored locally, and can be downloaded as a CSV file.
+    </p>
+
+    <h2>Setup / Installation</h2>
+    <ol>
+        <li>Ensure all the extension files (`manifest.json`, `popup.html`, `popup.js`, `content.js`, `background.js`, `bg.png`, and the `icons` folder) are together in one main folder (e.g., `indeed-scraper-extension`).</li>
+        <li>Open your Chrome or Brave browser and navigate to the Extensions page:
+            <ul>
+                <li>Chrome: <code>chrome://extensions</code></li>
+                <li>Brave: <code>brave://extensions</code></li>
+            </ul>
+        </li>
+        <li>Enable <strong>Developer mode</strong> using the toggle switch (usually in the top-right corner).</li>
+        <li>Click the <strong>"Load unpacked"</strong> button.</li>
+        <li>Navigate to and select the main folder containing the extension files (e.g., `indeed-scraper-extension`).</li>
+        <li>The extension icon should appear in your browser's toolbar.</li>
+    </ol>
+
+    <h2>How to Use</h2>
+    <ol>
+        <li>Navigate to an Indeed job search results page (e.g., <code>https://fr.indeed.com/jobs?q=...&l=...</code>).</li>
+        <li>Click the extension's icon in your browser toolbar to open the popup window.</li>
+        <li>Click the <strong>"Start Scraping"</strong> button in the popup. The status text should change to "Scraping active...".</li>
+        <li>
+            <strong>Manually click</strong> on the first job card you want to scrape from the <strong>left-hand list</strong> on the Indeed page. Click the main body of the card (the `div[data-testid="slider_item"]`), not necessarily the job title link itself.
+        </li>
+        <li>Wait for the job details panel on the right-hand side to fully load/update. The extension automatically scrapes the data in the background shortly after the panel updates. (Check the DevTools console for logs if needed).</li>
+        <li>Repeat steps 4 & 5: Click the next job card on the left, wait for the right panel to update. Continue for all jobs you want on the current page.</li>
+        <li>If you want jobs from the next page of Indeed results, manually navigate to the next page using Indeed's pagination buttons.</li>
+        <li>Repeat the clicking process (steps 4-6) for the jobs on the new page. The extension will keep adding unique jobs to its stored list.</li>
+        <li>When you have finished clicking all the jobs you want to scrape (for this session or overall), you can optionally click the <strong>"Stop Scraping"</strong> button in the popup. This stops the extension from listening for further clicks. You can restart it later.</li>
+        <li>Click the <strong>"Download Jobs (CSV)"</strong> button in the popup. A "Save As" dialog will appear, allowing you to save the collected job data as a CSV file (e.g., `indeed_jobs_YYYYMMDDHHMMSS.csv`).</li>
+        <li>
+            The <strong>"Clear Stored Jobs"</strong> button will permanently delete all job data stored by the extension within your browser. <span class="caution">Use this with caution, as the data cannot be recovered!</span>
+        </li>
+    </ol>
+
+    <h2>Output CSV Columns Explained</h2>
+    <ul>
+        <li><strong>Position Name</strong>: The job title.</li>
+        <li><strong>Company</strong>: The hiring company's name.</li>
+        <li><strong>Location</strong>: The job location text.</li>
+        <li><strong>Salary</strong>: Salary information, if available (often empty).</li>
+        <li><strong>Job Type</strong>: Type(s) of employment (e.g., "CDI, Temps plein"), comma-separated if multiple.</li>
+        <li><strong>Shift & Schedule</strong>: Work hours/schedule details, comma-separated if multiple.</li>
+        <li><strong>Education_Level</strong>: Required education levels, comma-separated if multiple.</li>
+        <li><strong>Skills</strong>: Listed skills, comma-separated if multiple.</li>
+        <li><strong>Description</strong>: The full job description text, including HTML formatting (e.g., paragraphs, lists).</li>
+        <li><strong>ID</strong>: The unique Indeed Job Key (e.g., d1b7dbf7c8a63b20).</li>
+        <li><strong>Indeed_View_Job_Link</strong>: The standard URL to view this job directly on Indeed. Always generated if an ID is found.</li>
+        <li><strong>External_Apply_Link</strong>: Populated ONLY if a direct external application link (e.g., to jobaffinity.fr, company ATS) was found embedded in the page's JavaScript data. Often empty.</li>
+        <li><strong>Indeed_Apply_Start_Link</strong>: Populated ONLY if the apply button was the "Continuer pour postuler" type, linking to an Indeed `/applystart?...` URL. Often empty.</li>
+        <li><strong>Scraped At</strong>: The date and time (ISO format, UTC) when the specific job's details were scraped.</li>
+    </ul>
+    <p><em>Note: Some fields (like Salary, Education, and the specific apply links) might be empty if the information wasn't present on the Indeed listing.</em></p>
+
+    <h2>Notes & Troubleshooting</h2>
+    <ul>
+        <li>If the extension stops working (e.g., doesn't scrape after clicking), try reloading the extension from the <code>chrome://extensions</code> page.</li>
+        <li>If Indeed significantly changes its website structure, the CSS selectors used by this extension may break, requiring updates to the <code>content.js</code> file.</li>
+        <li>This extension relies entirely on manual clicks to trigger scraping; it does not automatically navigate pages or click jobs.</li>
+        <li>Scraped data is stored locally within your browser's extension storage. Clearing your browser data or removing the extension may delete the stored jobs. Use the "Clear Stored Jobs" button for explicit removal.</li>
+    </ul>
+
+</body>
+</html>
