@@ -1,383 +1,557 @@
-console.log("Indeed Scraper: Content script loaded.");
+console.log("Indeed Scraper: Content script loaded (Manual Save Button Mode).");
 
 // --- Configuration ---
-const LEFT_LIST_JOB_CARD_SELECTOR = 'div[data-testid="slider_item"]'; // Clickable container on the left
-const JOB_KEY_SELECTOR_INSIDE_CARD = '[data-jk]'; // Element containing data-jk inside the card
-// Try multiple possible selectors for the details panel
+const DEBUG_MODE = false; // Mettre à true pour réactiver les logs détaillés
+const LEFT_LIST_JOB_CARD_SELECTOR = 'div[data-testid="slider_item"]';
+const JOB_KEY_SELECTOR_INSIDE_CARD = '[data-jk]';
+
 const DETAILS_PANEL_SELECTORS = [
-    '#vjs-container', // Original selector
-    '#jobsearch-ViewjobPaneWrapper', // Alternative selector
-    'div[data-testid="viewJobSSRRoot"]', // Another possible selector
-    '#viewJobSSRRoot', // Another variation
-    '#jobsearch-ViewJob', // Yet another possible container
-    '.jobsearch-ViewJobLayout' // Additional container class
+    '#jobsearch-ViewjobPaneWrapper',
+    'div[data-testid="viewJobSSRRoot"] > div > div:nth-child(2)',
+    '.jobsearch-ViewJobLayout-mainPane',
+    '#vjs-container',
+    '.jobsearch-ViewJobLayout',
+    'aside[aria-label="description détaillée du poste"]',
+    'aside[aria-labelledby="jobsearch-ViewJobViewComponent-heading"]',
+    '#viewJobSSRRoot',
+    '#jobsearch-ViewJob'
 ];
-const DEBOUNCE_DELAY_MS = 600; // Wait slightly longer after panel updates before scraping
-const PANEL_FIND_RETRY_MAX = 10; // Maximum number of retries to find the panel
-const PANEL_FIND_RETRY_DELAY_MS = 1000; // Delay between retries
+
+const INJECTION_POINT_SELECTORS = [
+    '.jobsearch-JobInfoHeader-headerContainer',
+    'div[data-testid="jobsearch-JobInfoHeader-header"]',
+    'h1.jobsearch-JobInfoHeader-title',
+    'h2[data-testid="simpler-jobTitle"]',
+    'h1[data-testid="jobTitle"]',
+    '.jobsearch-JobInfoHeader-title-container',
+    '.jobsearch-ViewJobLayout-viewIndicator',
+    '#jobDescriptionText',
+    'div[data-testid="jobDescriptionText"]'
+];
+
+const SAVE_BUTTON_ID = 'manualSaveJobButtonIndeedExt';
+const DEBOUNCE_DELAY_MS = 200; // Légèrement augmenté pour laisser le temps au DOM
+const PANEL_FIND_RETRY_MAX = 5; // Moins de tentatives rapides, on se fie plus au periodic check
+const PANEL_FIND_RETRY_DELAY_MS = 1000;
+const PERIODIC_CHECK_INTERVAL_MS = 15000; // Vérifier toutes les 15 secondes
 
 // --- State Variables ---
-let isScrapingActive = false; // Tracks if scraping should be happening
-let currentJobKey = null; // Temporarily stores the Job Key of the *last clicked* job card
-let observer = null; // Holds the MutationObserver instance
-let debounceTimeout = null; // Holds the timeout ID for debouncing
-let panelFindRetries = 0; // Counter for panel finding retries
-let periodicCheckInterval = null; // For ongoing panel checks
+let isAddButtonActive = false;
+let currentJobKeyForPanel = null;
+let observer = null;
+let debounceTimeout = null;
+let panelFindRetries = 0;
+let periodicCheckInterval = null;
+let lastFoundPanelElement = null; // Garder une référence au dernier panneau trouvé
 
 // --- Helper Functions ---
-
 function safeQuerySelector(selector, parentElement = document) {
     try {
+        document.createDocumentFragment().querySelector(selector); // Vérifie la validité
         return parentElement.querySelector(selector);
-    } catch (e) {
-        // console.error(`Error querying selector "${selector}":`, e); // Reduced console noise
-        return null;
-    }
+    } catch (e) { return null; }
 }
-
 function safeQuerySelectorAll(selector, parentElement = document) {
     try {
+        document.createDocumentFragment().querySelector(selector); // Vérifie la validité
         return parentElement.querySelectorAll(selector);
-    } catch (e) {
-        // console.error(`Error querying selector all "${selector}":`, e); // Reduced console noise
-        return [];
-    }
+    } catch (e) { return []; }
 }
-
 function safeGetText(element, useInnerHTML = false) {
     if (!element) return "";
     try {
         const text = useInnerHTML ? element.innerHTML : element.innerText;
         return text ? text.trim() : "";
-    } catch (e) {
-        console.error("Error getting text:", e, element);
-        return "";
-    }
+    } catch (e) { console.error("Error getting text:", e, element); return ""; }
 }
-
 function safeGetAttribute(element, attributeName) {
     if (!element) return "";
     try {
         return element.getAttribute(attributeName) || "";
-    } catch (e) {
-        console.error(`Error getting attribute "${attributeName}":`, e, element);
-        return "";
-    }
+    } catch (e) { console.error(`Error getting attribute "${attributeName}":`, e, element); return ""; }
 }
-
 function getJoinedTextFromAll(selector, parentElement) {
     const elements = safeQuerySelectorAll(selector, parentElement);
     if (!elements || elements.length === 0) return "";
-    const texts = Array.from(elements).map(el => safeGetText(el)).filter(text => text); // Filter out empty strings
+    const texts = Array.from(elements).map(el => safeGetText(el)).filter(text => text);
     return texts.join(', ');
 }
-
 function getExternalUrlFromInitialData() {
     try {
-        // Added more null checks for robustness
-        const jobUrl = window._initialData?.hostQueryExecutionResult?.data?.jobData?.results?.[0]?.job?.url;
-        if (jobUrl && typeof jobUrl === 'string' && jobUrl.startsWith('http') && !jobUrl.includes('indeed.com/viewjob') && !jobUrl.includes('indeed.com/pagead') ) {
-             // Added check against pagead links which are also internal
-            return jobUrl;
+        const results = window._initialData?.hostQueryExecutionResult?.data?.jobData?.results;
+        if (results && results.length > 0) {
+             const jobUrl = results[0]?.job?.url;
+             if (jobUrl && typeof jobUrl === 'string' && jobUrl.startsWith('http') && !jobUrl.includes('indeed.com/viewjob') && !jobUrl.includes('indeed.com/pagead') ) {
+                return jobUrl;
+             }
         }
-    } catch (error) {
-        console.warn("Could not access _initialData for external URL:", error);
-    }
+    } catch (error) { if (DEBUG_MODE) console.warn("Could not access _initialData for external URL:", error); }
     return null;
 }
 
+// --- Fonction findDetailsPanel (Simplifiée) ---
 function findDetailsPanel() {
-    // Try each selector in order
+    // if (DEBUG_MODE) console.log("Attempting to find details panel...");
     for (const selector of DETAILS_PANEL_SELECTORS) {
         const panel = safeQuerySelector(selector);
         if (panel) {
-            console.log(`Found details panel using selector: ${selector}`);
-            return panel;
+            // if (DEBUG_MODE) console.log(`Found potential details panel using selector: "${selector}"`);
+            lastFoundPanelElement = panel; // Store reference
+            return panel; // Retourne dès qu'un panneau est trouvé par un sélecteur principal
         }
     }
-    
-    // If we still can't find the panel, try a more general approach
-    // Look for elements that might contain the job description
-    const descriptionContainer = safeQuerySelector('#jobDescriptionText') || 
-                                 safeQuerySelector('div[data-testid="jobDescriptionText"]');
-    
+    // Fallback via description
+    // if (DEBUG_MODE) console.log("Trying fallback search via job description parent...");
+    const descriptionContainer = safeQuerySelector('#jobDescriptionText') || safeQuerySelector('div[data-testid="jobDescriptionText"]');
     if (descriptionContainer) {
-        // Try to find the nearest container that would be suitable for observation
         let parent = descriptionContainer.parentElement;
-        // Go up a few levels to find a suitable container
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 6; i++) {
             if (!parent) break;
-            console.log("Found potential panel via job description parent traversal");
-            return parent;
+            for (const selector of DETAILS_PANEL_SELECTORS) {
+                 try {
+                     if (parent.matches(selector)) {
+                         // if (DEBUG_MODE) console.log(`Found panel via description parent traversal matching "${selector}"`);
+                         lastFoundPanelElement = parent; // Store reference
+                         return parent;
+                     }
+                 } catch(e) { /* ignore invalid selectors */ }
+            }
+             if (parent.id && (parent.id.includes('viewjob') || parent.id.includes('ViewJob') || parent.id.includes('jobsearch'))) {
+                 // if (DEBUG_MODE) console.log("Found potential panel via description parent traversal (ID match):", parent.id);
+                 lastFoundPanelElement = parent; // Store reference
+                 return parent;
+            }
+            if (parent.classList.contains('jobsearch-ViewJobLayout') || parent.tagName === 'ASIDE') {
+                // if (DEBUG_MODE) console.log("Found potential panel via description parent traversal (class/tag):", parent.tagName, parent.className);
+                 lastFoundPanelElement = parent; // Store reference
+                return parent;
+            }
             parent = parent.parentElement;
         }
     }
-    
+    // Log CRITICAL seulement si TOUT échoue après toutes les tentatives.
+    // console.error("CRITICAL: Could not find details panel using any known selector or fallback.");
+    lastFoundPanelElement = null;
     return null;
 }
 
-function scrapeJobDetails() {
-    console.log(`Scraping details for Job Key: ${currentJobKey}`);
-    if (!currentJobKey) {
-        console.warn("Scrape triggered, but no currentJobKey is set. Skipping.");
+
+// --- Button Injection Logic ---
+function removeExistingSaveButton() {
+    const existingButton = document.getElementById(SAVE_BUTTON_ID);
+    if (existingButton) {
+        existingButton.remove();
+    }
+}
+
+function injectSaveButton(panelElement, jobKey) {
+    if (!panelElement || !jobKey) {
+        if (DEBUG_MODE) console.warn("Cannot inject button: Missing panel or job key.");
+        return;
+    }
+    // if (DEBUG_MODE) console.log("Attempting to inject save button inside panel:", panelElement);
+    removeExistingSaveButton();
+
+    let injectionPoint = null;
+    let foundSelector = null;
+
+    // if (DEBUG_MODE) console.log("Searching for injection point within the panel...");
+    for (const selector of INJECTION_POINT_SELECTORS) {
+        injectionPoint = safeQuerySelector(selector, panelElement);
+        if (injectionPoint) {
+            foundSelector = selector;
+            // if (DEBUG_MODE) console.log(`Found injection point using selector: "${foundSelector}"`);
+            break;
+        }
+    }
+
+    if (!injectionPoint) {
+        console.error(`Could not find ANY specific injection point using selectors [${INJECTION_POINT_SELECTORS.join(', ')}] inside the panel. Cannot inject button.`);
         return;
     }
 
-    const detailsPanel = findDetailsPanel();
-    if (!detailsPanel) {
-        console.error("Details panel not found for scraping.");
-        currentJobKey = null; // Prevent retry with stale key
+    const saveButton = document.createElement('button');
+    saveButton.id = SAVE_BUTTON_ID;
+    saveButton.textContent = '💾 Sauvegarder cette offre';
+    saveButton.dataset.jobKey = jobKey;
+    // Styles (gardés)
+    saveButton.style.backgroundColor = '#198754'; saveButton.style.color = 'white';
+    saveButton.style.padding = '8px 15px'; saveButton.style.border = 'none';
+    saveButton.style.borderRadius = '6px'; saveButton.style.cursor = 'pointer';
+    saveButton.style.marginTop = '15px'; saveButton.style.marginBottom = '15px';
+    saveButton.style.fontSize = '14px'; saveButton.style.fontWeight = '500';
+    saveButton.style.display = 'block'; saveButton.style.width = 'fit-content';
+    saveButton.style.marginLeft = '0'; saveButton.style.marginRight = '0';
+    saveButton.style.transition = 'background-color 0.2s ease, opacity 0.2s ease';
+
+    saveButton.addEventListener('click', handleSaveButtonClick);
+
+    if (injectionPoint.parentNode) {
+        injectionPoint.parentNode.insertBefore(saveButton, injectionPoint.nextSibling);
+        if (DEBUG_MODE) console.log(`Injected save button AFTER element found by selector "${foundSelector}" for Job Key: ${jobKey}`);
+    } else {
+         console.error("Could not inject button: The identified injection point has no parent node.", injectionPoint);
+         panelElement.prepend(saveButton); // Fallback très peu probable
+         if (DEBUG_MODE) console.warn(`Injection after element failed (no parent), using Fallback Prepend for Job Key: ${jobKey}`);
+    }
+}
+
+// --- Event Handler for the NEW Save Button ---
+async function handleSaveButtonClick(event) {
+    const button = event.currentTarget;
+    const jobKeyToSave = button.dataset.jobKey;
+
+    if (!jobKeyToSave) {
+        console.error("Save button clicked, but no job key found!");
+        button.textContent = 'Erreur (pas de clé)';
         return;
     }
+
+    if (DEBUG_MODE) console.log(`Manual save requested for Job Key: ${jobKeyToSave}`);
+    button.disabled = true;
+    button.textContent = '💾 Sauvegarde en cours...';
+    button.style.opacity = '0.7';
+
+    const jobData = await scrapeJobDetails(jobKeyToSave);
+
+    if (jobData) {
+        chrome.runtime.sendMessage({ action: "SAVE_JOB_DATA", payload: jobData }, (response) => {
+            if (chrome.runtime.lastError) {
+                console.error("Error sending scraped data:", chrome.runtime.lastError.message, jobData);
+                button.textContent = '❌ Erreur Envoi';
+                button.style.backgroundColor = '#dc3545';
+            } else {
+                if (DEBUG_MODE) console.log("Scraped data sent to background:", response);
+                if (response && response.success) {
+                    button.textContent = response.duplicate ? '✅ Déjà Sauvegardé' : '✅ Offre Sauvegardée!';
+                    button.style.backgroundColor = response.duplicate ? '#ffc107' : '#0d6efd';
+                } else {
+                    button.textContent = '❌ Erreur Sauvegarde';
+                    button.style.backgroundColor = '#dc3545';
+                }
+            }
+        });
+    } else {
+        console.error("Scraping failed for job key:", jobKeyToSave);
+        button.textContent = '❌ Erreur Scraping';
+        button.style.backgroundColor = '#dc3545';
+    }
+}
+
+
+// --- Modified Scraping Function (accepts jobKey) ---
+async function scrapeJobDetails(jobKey) {
+    // if (DEBUG_MODE) console.log(`Scraping details requested for Job Key: ${jobKey}`);
+    if (!jobKey) {
+        console.warn("Scrape triggered, but no jobKey provided.");
+        return null;
+    }
+
+    // Utilise la dernière référence connue si disponible, sinon cherche
+    const detailsPanel = lastFoundPanelElement && document.body.contains(lastFoundPanelElement)
+                         ? lastFoundPanelElement
+                         : findDetailsPanel();
+
+    if (!detailsPanel) {
+        console.error(`Details panel not found for scraping job ${jobKey}.`);
+        return null;
+    }
+    // if (DEBUG_MODE) console.log("Scraping details within panel:", detailsPanel);
 
     // --- Extract Data ---
-    // First try with the original selectors
-    let positionName = safeGetText(safeQuerySelector('h2[data-testid="simpler-jobTitle"]', detailsPanel));
-    let company = safeGetText(safeQuerySelector('div[data-testid="simpler-simplified-header"] a.jobsearch-JobInfoHeader-companyNameLink', detailsPanel));
-    let location = safeGetText(safeQuerySelector('div[data-testid="jobsearch-JobInfoHeader-companyLocation"]', detailsPanel));
-    
-    // If we couldn't get basic info, try alternative selectors
-    if (!positionName) {
-        positionName = safeGetText(safeQuerySelector('h1.jobsearch-JobInfoHeader-title', detailsPanel)) ||
-                      safeGetText(safeQuerySelector('h1[data-testid="jobTitle"]', detailsPanel));
-    }
-    
-    if (!company) {
-        company = safeGetText(safeQuerySelector('div.jobsearch-CompanyInfo a', detailsPanel)) ||
-                 safeGetText(safeQuerySelector('div[data-testid="company-name"]', detailsPanel));
-    }
-    
-    if (!location) {
-        location = safeGetText(safeQuerySelector('div.jobsearch-CompanyInfo div.css-1p0jwwu', detailsPanel)) ||
-                  safeGetText(safeQuerySelector('div[data-testid="company-location"]', detailsPanel));
-    }
+    let positionName = safeGetText(safeQuerySelector('h2[data-testid="simpler-jobTitle"]', detailsPanel)) ||
+                      safeGetText(safeQuerySelector('h1.jobsearch-JobInfoHeader-title', detailsPanel)) ||
+                      safeGetText(safeQuerySelector('h1[data-testid="jobTitle"]', detailsPanel)) ||
+                      safeGetText(safeQuerySelector('.jobsearch-JobInfoHeader-title', detailsPanel));
 
-    // Flexible approach for description to handle different structures
-    const descriptionElement = safeQuerySelector('#jobDescriptionText', detailsPanel) || 
+    let company = safeGetText(safeQuerySelector('div[data-testid="simpler-simplified-header"] a[data-testid="companyLink"]', detailsPanel)) ||
+                 safeGetText(safeQuerySelector('div[data-testid="jobsearch-JobInfoHeader-companyName"]', detailsPanel)) ||
+                 safeGetText(safeQuerySelector('div[data-company-name="true"] a', detailsPanel)) ||
+                 safeGetText(safeQuerySelector('a.jobsearch-JobInfoHeader-companyNameLink', detailsPanel));
+
+    let location = safeGetText(safeQuerySelector('div[data-testid="jobsearch-JobInfoHeader-companyLocation"]', detailsPanel)) ||
+                   safeGetText(safeQuerySelector('div[data-testid="company-location"]', detailsPanel)) ||
+                   safeGetText(safeQuerySelector('.jobsearch-JobInfoCompanyLocation', detailsPanel));
+
+    const descriptionElement = safeQuerySelector('#jobDescriptionText', detailsPanel) ||
                               safeQuerySelector('div[data-testid="jobDescriptionText"]', detailsPanel);
-    
+
+    const getDetailListItemText = (ariaLabel) => {
+        let text = "";
+        text = getJoinedTextFromAll(`div[aria-label*="${ariaLabel}"] li[data-testid="list-item"] span`, detailsPanel);
+        if (text) return text;
+
+        const metadataContainer = safeQuerySelector('#jobDetailsSection', detailsPanel) || safeQuerySelector('div[data-testid="job-details-section"]', detailsPanel);
+        if(metadataContainer) {
+             const directLabelDiv = safeQuerySelector(`div[aria-label*="${ariaLabel}"]`, metadataContainer);
+             if(directLabelDiv) {
+                 text = getJoinedTextFromAll('li, span', directLabelDiv);
+                 if(text) return text;
+             }
+             const potentialLabels = safeQuerySelectorAll('div > div', metadataContainer);
+             for(const labelDiv of potentialLabels) {
+                 const labelText = safeGetText(labelDiv);
+                 if (labelText && ariaLabel.toLowerCase().split(' ').some(word => labelText.toLowerCase().includes(word) && word.length > 3)) {
+                     const valueDiv = labelDiv.nextElementSibling;
+                      if(valueDiv) {
+                         text = safeGetText(valueDiv);
+                         if (text) return text;
+                     }
+                     if (labelText.includes(':')) {
+                        text = labelText.split(':')[1]?.trim();
+                         if (text) return text;
+                     }
+                 }
+             }
+        }
+        text = getJoinedTextFromAll(`#jobDetailsSection div:has(> svg[aria-label*="${ariaLabel}"]) + div span`, detailsPanel);
+        if (text) return text;
+
+        return "";
+    };
+
     const jobData = {
-        "ID": currentJobKey,
-        "Position Name": positionName,
-        "Company": company,
-        "Location": location,
-        "Salary": safeGetText(safeQuerySelector('div[aria-label="Salaire"] li[data-testid="list-item"] span', detailsPanel)),
-        "Job Type": getJoinedTextFromAll('div[aria-label="Type de poste"] li[data-testid="list-item"] span', detailsPanel),
-        "Shift & Schedule": getJoinedTextFromAll('div[aria-label="Horaires de travail"] li[data-testid="list-item"] span', detailsPanel),
-        "Education_Level": getJoinedTextFromAll('div[aria-label="Formation"] li[data-testid="list-item"] span', detailsPanel),
-        "Skills": getJoinedTextFromAll('div[aria-label="Compétences"] li[data-testid="list-item"] span', detailsPanel),
-        "Description": safeGetText(descriptionElement, true),
-        "Indeed_View_Job_Link": `https://fr.indeed.com/viewjob?jk=${currentJobKey}`,
+        "ID": jobKey,
+        "Position Name": positionName || "Non trouvé",
+        "Company": company || "Non trouvé",
+        "Location": location || "Non trouvé",
+        "Salary": getDetailListItemText("Salaire"),
+        "Job Type": getDetailListItemText("Type de poste") || getDetailListItemText("Job type"),
+        "Shift & Schedule": getDetailListItemText("Horaires de travail") || getDetailListItemText("Shift and schedule"),
+        "Education_Level": getDetailListItemText("Formation") || getDetailListItemText("Education"),
+        "Skills": getDetailListItemText("Compétences") || getDetailListItemText("Qualifications") || getDetailListItemText("Hiring insights"),
+        "Languages": getDetailListItemText("Langues"),
+        "Description": safeGetText(descriptionElement, true) || "Description non trouvée",
+        "Indeed_View_Job_Link": `https://fr.indeed.com/viewjob?jk=${jobKey}`,
         "External_Apply_Link": getExternalUrlFromInitialData() || "",
-        "Indeed_Apply_Start_Link": safeGetAttribute(safeQuerySelector('#applyButtonLinkContainer button[href]', detailsPanel), 'href'),
+        "Indeed_Apply_Start_Link": safeGetAttribute(safeQuerySelector('#indeedApplyButton', detailsPanel), 'href') ||
+                                  safeGetAttribute(safeQuerySelector('a[data-tn-element="jobTitle"]', detailsPanel), 'href') ||
+                                  safeGetAttribute(safeQuerySelector('#applyButtonLinkContainer button[href]', detailsPanel), 'href') ||
+                                  safeGetAttribute(safeQuerySelector('button[data-tn-element="IndeedApplyButton"]', detailsPanel),'href'),
         "Scraped At": new Date().toISOString()
     };
 
-    console.log("Scraped Data:", jobData);
-
-    // Send scraped data to background script
-    chrome.runtime.sendMessage({ action: "SAVE_JOB_DATA", payload: jobData }, (response) => {
-        if (chrome.runtime.lastError) {
-            console.error("Error sending scraped data:", chrome.runtime.lastError.message, jobData);
-        } else {
-            console.log("Scraped data sent to background:", response);
-        }
-    });
-
-    currentJobKey = null; // Reset key after successful scrape attempt
+    // if (DEBUG_MODE) console.log("Scraped Data:", jobData);
+    return jobData;
 }
 
+// --- Modified Event Listener for Job Card Click ---
 function handleJobCardClick(event) {
-    if (!isScrapingActive) return;
-
-    // Find the card container, even if the click was on a child element
     const jobCard = event.target.closest(LEFT_LIST_JOB_CARD_SELECTOR);
-    if (!jobCard) {
-        console.log("Click detected, but not inside a recognized job card.");
-        return; // Exit if the click wasn't on or inside a job card
-    }
+    if (!jobCard) return;
 
-    console.log("Job card clicked:", jobCard);
     const jobKeyElement = safeQuerySelector(JOB_KEY_SELECTOR_INSIDE_CARD, jobCard);
     const jobKey = jobKeyElement ? safeGetAttribute(jobKeyElement, 'data-jk') : null;
 
     if (jobKey) {
-        console.log(`Captured Job Key: ${jobKey}`);
-        currentJobKey = jobKey;
-        
-        // After capturing the job key, try to manually trigger a scrape after a delay
-        // This serves as a backup in case the mutation observer fails
-        setTimeout(() => {
-            if (isScrapingActive && currentJobKey === jobKey) {
-                console.log("Attempting backup scrape after delay");
-                scrapeJobDetails();
-            }
-        }, 1500); // Wait 1.5 seconds
-        
+        if (DEBUG_MODE) console.log(`Detected click for Job Key: ${jobKey}. Panel update expected.`);
+        currentJobKeyForPanel = jobKey;
+        removeExistingSaveButton(); // Remove button immediately on click
     } else {
-        console.warn("Could not find job key (data-jk) on clicked card or its children.");
-        currentJobKey = null;
+        // if (DEBUG_MODE) console.warn("Could not find job key (data-jk) on clicked card.");
+        currentJobKeyForPanel = null;
+        removeExistingSaveButton();
     }
 }
 
+// --- Modified Mutation Observer Logic ---
 function handlePanelMutation(mutationsList) {
-    if (!isScrapingActive || !currentJobKey) return;
+    if (!isAddButtonActive || !currentJobKeyForPanel) return;
 
-    // Basic check if the panel content likely changed significantly
-    let panelChanged = false;
-    for (const mutation of mutationsList) {
-        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-             // Check if added nodes contain potentially identifying info like job title selector
-             for(const node of mutation.addedNodes) {
-                 if (node.nodeType === Node.ELEMENT_NODE) {
-                    if (node.querySelector('h2[data-testid="simpler-jobTitle"]') || 
-                        node.querySelector('h1.jobsearch-JobInfoHeader-title') ||
-                        node.querySelector('h1[data-testid="jobTitle"]') ||
-                        node.querySelector('#jobDescriptionText')) {
-                        panelChanged = true;
-                        break;
-                    }
-                 }
-             }
-        }
-        if(panelChanged) break;
-        // Could add more checks (e.g., attribute changes on specific elements) if needed
-    }
+    // Simple trigger on mutation is enough, debounce will handle frequency
+    // if (DEBUG_MODE) console.log("Relevant details panel mutation detected. Debouncing button injection...");
 
-    if (!panelChanged) {
-       // console.log("Mutation detected, but doesn't look like a panel content update. Ignoring.");
-        return; // Ignore minor mutations
-    }
-
-    console.log("Relevant details panel mutation detected.");
     clearTimeout(debounceTimeout);
     debounceTimeout = setTimeout(() => {
-        if (isScrapingActive && currentJobKey) {
-            scrapeJobDetails();
+        // if (DEBUG_MODE) console.log("Debounced action triggered: Attempting button injection.");
+        if (isAddButtonActive && currentJobKeyForPanel) {
+            // Tentative de retrouver le panneau APRES le délai
+            const panel = findDetailsPanel();
+            if(panel) {
+                 // Vérification de clé (optionnelle mais utile si possible)
+                 const panelKey = safeGetAttribute(safeQuerySelector('[data-jk]', panel), 'data-jk') || panel.dataset.jobid;
+                 if (panelKey && panelKey !== currentJobKeyForPanel) {
+                      if (DEBUG_MODE) console.warn(`Panel content key (${panelKey}) does not match expected key (${currentJobKeyForPanel}). Aborting injection for this mutation.`);
+                      removeExistingSaveButton();
+                      // Ne pas réinitialiser currentJobKeyForPanel ici, une autre mutation pourrait corriger
+                 } else {
+                      // if (DEBUG_MODE) console.log(`Panel confirmed/updated for ${currentJobKeyForPanel}. Injecting save button.`);
+                      injectSaveButton(panel, currentJobKeyForPanel);
+                 }
+            } else {
+                 // C'est ici que l'erreur se produisait dans vos logs
+                 console.warn(`Panel not found AFTER debounce for key ${currentJobKeyForPanel}. Button not injected for this update.`);
+                 removeExistingSaveButton();
+                 // Ne pas logguer comme CRITICAL ici. periodicCheck s'en chargera si ça persiste.
+            }
         } else {
-            console.log("Debounced call: Scraping stopped or key cleared before scrape.");
+            // if (DEBUG_MODE) console.log("Debounced call: Button adding stopped or key cleared before injection.");
+            removeExistingSaveButton();
         }
     }, DEBOUNCE_DELAY_MS);
 }
 
+// --- Setup Panel Observer ---
 function setupPanelObserver() {
-    // If an observer is already set up, disconnect it first
     if (observer) {
         observer.disconnect();
         observer = null;
     }
-    
     const targetNode = findDetailsPanel();
     if (targetNode) {
-        panelFindRetries = 0; // Reset retry counter on success
-        const config = { childList: true, subtree: true };
+        panelFindRetries = 0;
+        const config = { childList: true, subtree: true, attributes: true, attributeFilter: ['id', 'class', 'style', 'data-jobid', 'aria-hidden'] };
         observer = new MutationObserver(handlePanelMutation);
-        observer.observe(targetNode, config);
-        console.log("MutationObserver attached to details panel.");
+        try {
+             observer.observe(targetNode, config);
+             // if (DEBUG_MODE) console.log("MutationObserver attached to details panel:", targetNode);
+        } catch (error) {
+             console.error("FAILED to attach MutationObserver:", error, "Target node:", targetNode);
+             lastFoundPanelElement = null; // Invalidate cache on error
+             return false;
+        }
+
+        if (isAddButtonActive) {
+             const currentPanelJobKey = safeGetAttribute(safeQuerySelector('[data-jk]', targetNode), 'data-jk') || targetNode.dataset.jobid;
+             if(currentPanelJobKey) {
+                  // if (DEBUG_MODE) console.log("Initial check: Panel already visible with Job Key", currentPanelJobKey, ". Injecting button.");
+                  currentJobKeyForPanel = currentPanelJobKey;
+                  setTimeout(() => injectSaveButton(targetNode, currentPanelJobKey), 100);
+             } else {
+                 // if (DEBUG_MODE) console.log("Initial check: Panel visible, but no Job Key found inside it.");
+             }
+        }
         return true;
+
     } else {
-        console.warn(`Could not find details panel to observe. Attempt ${panelFindRetries + 1}/${PANEL_FIND_RETRY_MAX}`);
+        if (panelFindRetries === 0 || panelFindRetries === PANEL_FIND_RETRY_MAX -1 ) {
+            if (DEBUG_MODE) console.warn(`Could not find details panel to observe. Attempt ${panelFindRetries + 1}/${PANEL_FIND_RETRY_MAX}`);
+        }
         return false;
     }
 }
 
-function activateScraping() {
-    console.log("Activating scraping listeners...");
-    isScrapingActive = true;
 
-    // Use event delegation on the document for clicks - more robust
-    // than attaching to individual cards that might load dynamically
-    document.addEventListener('click', handleJobCardClick, true); // Use capture phase
-    console.log(`Attached delegated click listener for job cards.`);
-
-    // Try to set up the panel observer
-    if (!setupPanelObserver() && panelFindRetries < PANEL_FIND_RETRY_MAX) {
-        // If we couldn't find the panel, try again after a delay
-        panelFindRetries++;
-        setTimeout(() => {
-            if (isScrapingActive) { // Only retry if scraping is still active
-                console.log(`Retrying panel observer setup (${panelFindRetries}/${PANEL_FIND_RETRY_MAX})...`);
-                setupPanelObserver();
-            }
-        }, PANEL_FIND_RETRY_DELAY_MS);
+// --- Activation / Deactivation ---
+function activateAddButtonFeature() {
+    if (isAddButtonActive && observer && lastFoundPanelElement && document.body.contains(lastFoundPanelElement)) {
+         // if (DEBUG_MODE) console.log("Add Button feature already active and observer seems attached.");
+         return;
     }
-    
-    // Also set up a periodic check to ensure we have an observer
-    // This helps if the panel is dynamically added to the DOM later
-    if (periodicCheckInterval) {
-        clearInterval(periodicCheckInterval);
-    }
-    
-    periodicCheckInterval = setInterval(() => {
-        if (!isScrapingActive) {
-            clearInterval(periodicCheckInterval);
-            periodicCheckInterval = null;
-            return;
-        }
-        
-        if (!observer && panelFindRetries < PANEL_FIND_RETRY_MAX) {
-            console.log("Periodic check: No observer found, attempting to set up...");
-            panelFindRetries++;
-            setupPanelObserver();
-        }
-    }, PANEL_FIND_RETRY_DELAY_MS * 2);
-}
+     if (isAddButtonActive && (!observer || !lastFoundPanelElement || !document.body.contains(lastFoundPanelElement))) {
+         if (DEBUG_MODE) console.log("Add Button feature was active but observer/panel needs re-attaching...");
+         if (!setupPanelObserver()) { // Tenter de rattacher
+             if (DEBUG_MODE) console.warn("Re-attach failed immediately.");
+         }
+         return;
+     }
 
-function deactivateScraping() {
-    if (!isScrapingActive && !observer) return; // Already inactive
-    console.log("Deactivating scraping listeners...");
-    isScrapingActive = false;
-    currentJobKey = null;
+    console.log("Activating Add Save Button feature...");
+    isAddButtonActive = true;
     panelFindRetries = 0;
 
-    // Remove delegated click listener
+    document.addEventListener('click', handleJobCardClick, true);
+    // if (DEBUG_MODE) console.log(`Attached delegated click listener.`);
+
+    if (!setupPanelObserver() && panelFindRetries < PANEL_FIND_RETRY_MAX) {
+        panelFindRetries++;
+        const retryInterval = setInterval(() => {
+            if (!isAddButtonActive) {
+                clearInterval(retryInterval);
+                return;
+            }
+            // if (DEBUG_MODE) console.log(`Retrying panel observer setup (${panelFindRetries}/${PANEL_FIND_RETRY_MAX})...`);
+            if (setupPanelObserver() || panelFindRetries >= PANEL_FIND_RETRY_MAX) {
+                 clearInterval(retryInterval);
+                 if(panelFindRetries >= PANEL_FIND_RETRY_MAX) {
+                     console.error("Failed to setup panel observer after multiple retries.");
+                 }
+            }
+            panelFindRetries++;
+        }, PANEL_FIND_RETRY_DELAY_MS);
+    }
+
+    // Vérification périodique
+    if (periodicCheckInterval) clearInterval(periodicCheckInterval);
+    periodicCheckInterval = setInterval(() => {
+        if (!isAddButtonActive) {
+            clearInterval(periodicCheckInterval); periodicCheckInterval = null; return;
+        }
+        // Vérifier si le noeud observé (ou le dernier trouvé) est toujours dans le DOM
+        if (observer && (!lastFoundPanelElement || !document.body.contains(lastFoundPanelElement))) {
+             if (DEBUG_MODE) console.warn("Periodic check: Observed panel node detached. Attempting re-setup...");
+             setupPanelObserver(); // Tenter de retrouver et ré-observer
+        } else if (!observer) { // Si pas d'observateur actif
+             if (DEBUG_MODE) console.log("Periodic check: No observer active. Attempting setup...");
+             setupPanelObserver();
+        }
+    }, PERIODIC_CHECK_INTERVAL_MS);
+}
+
+function deactivateAddButtonFeature() {
+    if (!isAddButtonActive && !observer && !document.getElementById(SAVE_BUTTON_ID)) {
+         return; // Déjà inactif
+    }
+    console.log("Deactivating Add Save Button feature...");
+    isAddButtonActive = false;
+    currentJobKeyForPanel = null;
+    panelFindRetries = 0;
+    lastFoundPanelElement = null;
+
     document.removeEventListener('click', handleJobCardClick, true);
-    console.log(`Removed delegated click listener.`);
+    // if (DEBUG_MODE) console.log(`Removed delegated click listener.`);
 
     if (observer) {
         observer.disconnect();
         observer = null;
-        console.log("MutationObserver disconnected.");
+        // if (DEBUG_MODE) console.log("MutationObserver disconnected.");
     }
-    
     if (periodicCheckInterval) {
         clearInterval(periodicCheckInterval);
         periodicCheckInterval = null;
+        // if (DEBUG_MODE) console.log("Stopped periodic observer check.");
     }
-    
     clearTimeout(debounceTimeout);
+    removeExistingSaveButton();
 }
 
 // --- Message Listener ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log("Content script received message:", request);
-
     if (request.action === "SET_SCRAPING_STATE") {
+         // if (DEBUG_MODE) console.log("Received SET_SCRAPING_STATE message:", request.isScraping);
         if (request.isScraping) {
-            activateScraping();
+            activateAddButtonFeature();
         } else {
-            deactivateScraping();
+            deactivateAddButtonFeature();
         }
-        // Send simple ack response, state management is primarily in background
         sendResponse({ success: true });
-        return false; // Synchronous response sufficient
+        return false; // Indique une réponse asynchrone non utilisée ici
     }
 });
 
 // --- Initial State Check ---
 chrome.runtime.sendMessage({ action: "GET_STATE" })
     .then(response => {
-        if (response && response.isScraping) {
-            console.log("Initial state is active, activating listeners.");
-            activateScraping();
+        if (chrome.runtime.lastError) { // Gérer l'erreur de communication
+             console.error("Error getting initial state:", chrome.runtime.lastError.message);
+             deactivateAddButtonFeature(); // Assumer inactif en cas d'erreur
+             return;
+        }
+        if (response && typeof response.isScraping !== 'undefined') {
+             // if (DEBUG_MODE) console.log("Initial state from background: isScraping =", response.isScraping);
+            if (response.isScraping) {
+                // if (DEBUG_MODE) console.log("Initial state is active, activating feature.");
+                setTimeout(activateAddButtonFeature, 500); // Délai initial
+            } else {
+                // if (DEBUG_MODE) console.log("Initial state is inactive.");
+                 deactivateAddButtonFeature(); // Assurer la désactivation
+            }
         } else {
-            console.log("Initial state is inactive.");
-            // Ensure deactivated if background says inactive
-            deactivateScraping();
+             console.warn("Invalid or missing initial state from background. Assuming inactive.");
+             deactivateAddButtonFeature();
         }
     })
-    .catch(error => {
-        console.error("Error getting initial state:", error);
-        // Assume inactive on error
-        deactivateScraping();
+    .catch(error => { // Gérer les erreurs de promesse (ex: background script non prêt)
+        console.error("Error getting initial state via promise:", error);
+        deactivateAddButtonFeature();
     });

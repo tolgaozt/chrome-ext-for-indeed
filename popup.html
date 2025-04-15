@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Indeed Scraper</title>
+  <meta charset="UTF-8">
+  <title>Indeed Scraper - Contrôle Manuel</title> <!-- Titre modifié -->
   <style>
     :root {
       /* Image URL */
@@ -176,39 +177,79 @@
       min-height: 1.2em;
       text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); /* Slightly stronger shadow */
     }
-    
+
     /* New styles for job counter and checkbox */
     #jobCounter {
-      margin-top: 8px;
+      margin-top: 8px; /* Ajusté pour être après le status */
       text-align: center;
       font-size: 13px;
       color: var(--misty-blue);
       text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
     }
-    
+
+    /* Style pour le conteneur de la checkbox */
+    #autoDeleteContainer {
+        margin-top: 15px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
     input[type="checkbox"] {
       cursor: pointer;
       accent-color: var(--blue-gray);
+      /* Style additionnel si nécessaire */
+      margin: 0; /* Réinitialiser la marge */
+      vertical-align: middle; /* Aligner avec le texte */
     }
-    
+
     label {
       cursor: pointer;
+      margin-left: 5px;
+      font-size: 12px;
+      color: var(--misty-blue);
+       vertical-align: middle; /* Aligner avec la checkbox */
     }
 
     .hidden {
       display: none;
     }
+
+    /* Style spécifique pour le bouton Sauvegarder sur la page (référence visuelle, non utilisé ici) */
+    #manualSaveJobButtonIndeedExt {
+        background-color: #198754; /* Green background */
+        color: white;
+        padding: 8px 15px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        margin-top: 10px;
+        margin-bottom: 15px;
+        font-size: 14px;
+        font-weight: 500;
+        display: block;
+        width: fit-content;
+        transition: background-color 0.3s ease, opacity 0.3s ease;
+    }
+     #manualSaveJobButtonIndeedExt:disabled {
+        opacity: 0.7;
+        cursor: not-allowed;
+     }
+     #manualSaveJobButtonIndeedExt:hover:not(:disabled) {
+        background-color: #157347; /* Darker green */
+     }
   </style>
 </head>
 <body>
-  <h3>Indeed Scraper</h3>
-  <button id="startButton">Start Scraping</button>
-  <button id="stopButton" class="hidden">Stop Scraping</button>
+  <h3>Indeed Scraper - Contrôle Manuel</h3> <!-- Titre modifié -->
+  <!-- Boutons renommés -->
+  <button id="startButton">Activer Bouton Sauvegarde</button>
+  <button id="stopButton" class="hidden">Désactiver Bouton Sauvegarde</button>
   <hr>
-  <button id="downloadButton">Download Jobs (CSV)</button>
-  <button id="clearButton">Clear Stored Jobs</button>
-  <div id="status">Status: Idle</div>
-  <!-- Job counter and auto-delete checkbox will be inserted by JS -->
+  <button id="downloadButton">Télécharger Offres Sauvegardées (CSV)</button> <!-- Texte légèrement ajusté -->
+  <button id="clearButton">Vider les Offres Sauvegardées</button> <!-- Texte légèrement ajusté -->
+  <div id="status">Status: Inactif</div> <!-- Statut initial -->
+  <!-- Le compteur et la checkbox seront insérés par JS après #status -->
 
   <script src="popup.js"></script>
 </body>
