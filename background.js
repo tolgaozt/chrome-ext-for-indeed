@@ -33,27 +33,24 @@ async function getJobCount() {
 
 async function clearDataButKeepIds() {
     try {
-        // Get current jobs and extract IDs
         const result = await chrome.storage.local.get([STORAGE_KEY, JOB_IDS_KEY]);
         const jobs = Array.isArray(result[STORAGE_KEY]) ? result[STORAGE_KEY] : [];
         let processedIds = result[JOB_IDS_KEY] || {};
-        
-        // Add current job IDs to the processed set with timestamps
+
         const now = new Date().toISOString();
         jobs.forEach(job => {
             if (job.ID && !processedIds[job.ID]) {
                 processedIds[job.ID] = {
                     processedAt: now,
-                    title: job["Position Name"] || "Unknown", 
+                    title: job["Position Name"] || "Unknown",
                     company: job["Company"] || "Unknown"
                 };
             }
         });
-        
-        // Save the updated IDs and clear the full job data
+
         await chrome.storage.local.set({ [JOB_IDS_KEY]: processedIds });
         await chrome.storage.local.remove([STORAGE_KEY]);
-        
+
         console.log(`Cleared ${jobs.length} jobs but kept ${Object.keys(processedIds).length} IDs for deduplication`);
         return true;
     } catch (error) {
@@ -65,7 +62,7 @@ async function clearDataButKeepIds() {
 // Message handler
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log("Background received message:", request.action);
-    
+
     if (request.action === "TOGGLE_SCRAPING") {
         isScrapingActive = !!request.start;
         chrome.storage.local.set({ isScrapingActive }).then(() => {
@@ -80,18 +77,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ success: false, error: err.message });
         });
         return true;
-    } 
-    
+    }
+
     else if (request.action === "GET_STATE") {
-        // Also include job count when getting state
         getJobCount().then(count => {
             sendResponse({ success: true, isScraping: isScrapingActive, jobCount: count });
         }).catch(err => {
             sendResponse({ success: true, isScraping: isScrapingActive, jobCount: 0, error: err.message });
         });
         return true;
-    } 
-    
+    }
+
     else if (request.action === "GET_JOB_COUNT") {
         getJobCount().then(count => {
             sendResponse({ success: true, count: count });
@@ -100,24 +96,47 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         return true;
     }
-    
+
     else if (request.action === "SAVE_JOB_DATA") {
         chrome.storage.local.get([STORAGE_KEY, JOB_IDS_KEY]).then(result => {
             const jobs = Array.isArray(result[STORAGE_KEY]) ? result[STORAGE_KEY] : [];
             const processedIds = result[JOB_IDS_KEY] || {};
-            
-            if (request.payload && request.payload.ID) {
-                // Check if job already exists in current jobs or processed IDs
-                if (!jobs.some(job => job.ID === request.payload.ID) && !processedIds[request.payload.ID]) {
-                    jobs.push(request.payload);
-                    chrome.storage.local.set({ [STORAGE_KEY]: jobs }).then(() => {
-                        console.log(`Job saved. Total: ${jobs.length}`);
-                        sendResponse({ success: true, jobCount: jobs.length });
+            const jobData = request.payload; // The full payload including potential forceSave flag
+            const forceSave = !!jobData?.forceSave; // <<< CHECK for the forceSave flag
+
+            if (jobData && jobData.ID) {
+                const jobId = jobData.ID;
+                const isDuplicateInCurrent = jobs.some(job => job.ID === jobId);
+                const isDuplicateInProcessed = !!processedIds[jobId];
+                const isDuplicate = isDuplicateInCurrent || isDuplicateInProcessed;
+
+                if (forceSave) {
+                    console.log(`DEBUG: Force saving job ID ${jobId} (was duplicate: ${isDuplicate}).`);
+                }
+
+                // <<< MODIFY the condition to include forceSave
+                if (forceSave || !isDuplicate) {
+                    let updatedJobs = jobs;
+                    // If forcing save and it exists, remove the old one first to avoid multiple entries in the current list
+                    if (forceSave && isDuplicateInCurrent) {
+                       updatedJobs = jobs.filter(job => job.ID !== jobId);
+                       console.log(`DEBUG: Removed existing entry for ${jobId} from current jobs before force-saving.`);
+                    }
+
+                    // Clean the forceSave flag before saving the actual job data
+                    const { forceSave: _discard, ...jobDataToSave } = jobData;
+                    updatedJobs.push(jobDataToSave);
+
+                    chrome.storage.local.set({ [STORAGE_KEY]: updatedJobs }).then(() => {
+                        console.log(`Job ${jobId} saved. Total: ${updatedJobs.length}. Forced: ${forceSave}`);
+                        // Send back success, and indicate if it *was* a duplicate that got overwritten/forced
+                        sendResponse({ success: true, jobCount: updatedJobs.length, duplicate: isDuplicate });
                     }).catch(err => {
                         sendResponse({ success: false, error: err.message });
                     });
                 } else {
-                    console.log("Job already exists or was previously processed");
+                    // Standard duplicate handling
+                    console.log(`Job ${jobId} already exists or was previously processed. Not saving.`);
                     sendResponse({ success: true, jobCount: jobs.length, duplicate: true });
                 }
             } else {
@@ -127,8 +146,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ success: false, error: err.message });
         });
         return true;
-    } 
-    
+    }
+
     else if (request.action === "GET_STORED_JOBS") {
         chrome.storage.local.get([STORAGE_KEY]).then(result => {
             const jobs = Array.isArray(result[STORAGE_KEY]) ? result[STORAGE_KEY] : [];
@@ -137,8 +156,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ success: false, error: err.message });
         });
         return true;
-    } 
-    
+    }
+
     else if (request.action === "CLEAR_DATA") {
         if (request.keepIds) {
             clearDataButKeepIds().then(success => {
@@ -147,7 +166,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 sendResponse({ success: false, error: err.message });
             });
         } else {
-            chrome.storage.local.remove([STORAGE_KEY]).then(() => {
+            // When clearing without keeping IDs, clear both job list and processed IDs for consistency
+             chrome.storage.local.remove([STORAGE_KEY, JOB_IDS_KEY]).then(() => {
+                 console.log("Cleared jobs and processed IDs.");
                 sendResponse({ success: true });
             }).catch(err => {
                 sendResponse({ success: false, error: err.message });
@@ -155,8 +176,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
         return true;
     }
-    
+
     else if (request.action === "CLEAR_ALL_DATA") {
+        // This action already clears both keys
         chrome.storage.local.remove([STORAGE_KEY, JOB_IDS_KEY]).then(() => {
             console.log("All job data and IDs cleared");
             sendResponse({ success: true });
@@ -165,6 +187,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         return true;
     }
-    
+
     return false;
 });

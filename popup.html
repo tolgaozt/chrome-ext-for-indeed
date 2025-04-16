@@ -238,18 +238,32 @@
      #manualSaveJobButtonIndeedExt:hover:not(:disabled) {
         background-color: #157347; /* Darker green */
      }
+
+     .debug-tip {
+        font-size: 11px;
+        color: var(--misty-blue);
+        text-align: center;
+        margin-top: 12px;
+        padding: 0 10px;
+        line-height: 1.4;
+    }
   </style>
 </head>
 <body>
-  <h3>Indeed Scraper - Contrôle Manuel</h3> <!-- Titre modifié -->
-  <!-- Boutons renommés -->
+  <h3>Indeed Scraper - Contrôle Manuel</h3>
   <button id="startButton">Activer Bouton Sauvegarde</button>
   <button id="stopButton" class="hidden">Désactiver Bouton Sauvegarde</button>
   <hr>
-  <button id="downloadButton">Télécharger Offres Sauvegardées (CSV)</button> <!-- Texte légèrement ajusté -->
-  <button id="clearButton">Vider les Offres Sauvegardées</button> <!-- Texte légèrement ajusté -->
-  <div id="status">Status: Inactif</div> <!-- Statut initial -->
-  <!-- Le compteur et la checkbox seront insérés par JS après #status -->
+  <button id="downloadButton">Télécharger Offres Sauvegardées (CSV)</button>
+  <button id="clearButton">Vider les Offres Sauvegardées</button>
+  <div id="status">Status: Inactif</div>
+  <!-- jobCounter and autoDeleteContainer are inserted by JS -->
+
+  <!-- <<< ADDED DEBUG TIP >>> -->
+  <p class="debug-tip">
+    Tip: Hold <kbd>Shift</kbd> while clicking '💾 Sauvegarder cette offre' on Indeed to re-save a job (ignores duplicate check).
+  </p>
+  <!-- <<< END OF ADDED DEBUG TIP >>> -->
 
   <script src="popup.js"></script>
 </body>
